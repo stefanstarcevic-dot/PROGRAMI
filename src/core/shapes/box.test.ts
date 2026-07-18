@@ -81,6 +81,11 @@ describe('generateBox', () => {
     const back = design.panels.find((p) => p.id === 'back')!;
     expect(top.holes.length).toBeGreaterThan(0);
     expect(back.holes.length).toBeGreaterThan(0);
+    expect(design.warnings.filter((w) => w.severity === 'error')).toEqual([]);
+    for (const panel of design.panels) {
+      expect(findSelfIntersections(panel.outline)).toHaveLength(0);
+      for (const hole of panel.holes) expect(findSelfIntersections(hole)).toHaveLength(0);
+    }
   });
 
   it('dividers add extra panels and matching slots in the bottom', () => {

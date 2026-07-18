@@ -98,11 +98,17 @@ export function generateKnuckleHinge(params: KnuckleHingeParams): KnuckleHingeRe
 
 function semicircleOutline(cx: number, segmentWidth: number, radius: number, steps = 16): Path {
   const half = segmentWidth / 2;
-  const pts: Vector2[] = [v2(cx - half, 0), v2(cx + half, 0)];
-  // Arc bulging outward (away from the panel edge) to form the knuckle.
+  // Walk the perimeter in order: left base point, along the arc (bulging
+  // to -y, away from the panel edge) from left to right, then the right
+  // base point — closing back to the left base via the flat top edge.
+  // (Emitting the two base points first, before the arc, produced a
+  // self-crossing polygon: the flat edge and the arc's start/end wound up
+  // on opposite sides of each other.)
+  const pts: Vector2[] = [v2(cx - half, 0)];
   for (let i = 1; i < steps; i++) {
     const angle = Math.PI * (i / steps);
     pts.push(v2(cx + Math.cos(Math.PI - angle) * radius, -Math.sin(angle) * radius));
   }
+  pts.push(v2(cx + half, 0));
   return pts;
 }

@@ -4,6 +4,7 @@ import { generateMortiseSlot, generateTenonTab, layoutDividerSlots } from './mor
 import { generateSnapFitTab, generateSnapFitCatchHole } from './snapFit';
 import { generateKnuckleHinge, magnetHole, evenlySpacedHoles } from './hardware';
 import type { FingerJointParams } from './finger';
+import { findSelfIntersections } from '../geometry/intersect';
 
 const params: FingerJointParams = { thickness: 3, kerf: 0.12, clearance: 0.05, minFingerWidthFactor: 2 };
 
@@ -67,6 +68,13 @@ describe('hardware', () => {
     const result = generateKnuckleHinge({ length: 100, thickness: 4, pinDiameter: 2, kerf: 0.12 });
     expect(result.panelAKnuckles.length + result.panelBKnuckles.length).toBe(result.pinHoles.length);
     expect(Math.abs(result.panelAKnuckles.length - result.panelBKnuckles.length)).toBeLessThanOrEqual(1);
+  });
+
+  it('knuckle outlines are simple polygons (no self-intersection)', () => {
+    const result = generateKnuckleHinge({ length: 200, thickness: 4, pinDiameter: 2, kerf: 0.15 });
+    for (const knuckle of [...result.panelAKnuckles, ...result.panelBKnuckles]) {
+      expect(findSelfIntersections(knuckle)).toHaveLength(0);
+    }
   });
 
   it('magnet hole shrinks for a snug press fit', () => {
