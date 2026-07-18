@@ -2,12 +2,13 @@ import type { Material } from '../materials/material';
 import type { ToleranceSetting } from '../materials/tolerance';
 import { resolveToleranceClearance } from '../materials/tolerance';
 import type { FingerJointParams } from '../joints/finger';
-import { generateMortiseSlot, generateTenonTab, layoutDividerSlots } from '../joints/mortiseTenon';
+import { generateMortiseSlot, layoutDividerSlots, rotatePath90 } from '../joints/mortiseTenon';
 import { generateKnuckleHinge } from '../joints/hardware';
 import { buildRectPanel } from './panelBuilder';
 import type { Design, Panel } from '../model/types';
 import { validateDesign } from '../validation/rules';
 import { v2 } from '../geometry/vector2';
+import { circlePath } from '../geometry/polygon';
 
 export type LidStyle = 'closed' | 'open' | 'friction' | 'hinged';
 
@@ -183,7 +184,7 @@ function makeHingedLid(w: number, d: number, thickness: number, params: FingerJo
   const hinge = generateKnuckleHinge({ length: w, thickness, pinDiameter: 2, kerf: params.kerf });
   // Knuckles for the lid sit along its back edge (y = d), offset outward.
   lid.holes.push(...hinge.panelAKnuckles.map((k) => k.map((p) => v2(p.x, d - p.y))));
-  lid.holes.push(...hinge.pinHoles.map((c) => circleAsPath({ x: c.center.x, y: d }, c.radius)));
+  lid.holes.push(...hinge.pinHoles.map((c) => circlePath(v2(c.center.x, d), c.radius)));
   return [lid];
 }
 
@@ -193,16 +194,7 @@ function patchBackForHinge(panels: Panel[], w: number, h: number, thickness: num
   const hinge = generateKnuckleHinge({ length: w, thickness, pinDiameter: 2, kerf: params.kerf });
   // Back panel's knuckles project outward (upward) from its top edge (y = h).
   back.holes.push(...hinge.panelBKnuckles.map((k) => k.map((p) => v2(p.x, h + p.y))));
-  back.holes.push(...hinge.pinHoles.map((c) => circleAsPath({ x: c.center.x, y: h }, c.radius)));
-}
-
-function circleAsPath(center: { x: number; y: number }, radius: number, steps = 24) {
-  const pts = [];
-  for (let i = 0; i < steps; i++) {
-    const a = (i / steps) * Math.PI * 2;
-    pts.push(v2(center.x + Math.cos(a) * radius, center.y + Math.sin(a) * radius));
-  }
-  return pts;
+  back.holes.push(...hinge.pinHoles.map((c) => circlePath(v2(c.center.x, h), c.radius)));
 }
 
 /**
@@ -236,20 +228,26 @@ function buildDividers(
 
     for (const posAlongMainAxis of positions) {
       const id = `divider-${div.axis}-${counter}`;
-      // Panel body: span (width) x H, with a full-length tenon along the
-      // bottom edge protruding by T so it plunges through the Bottom panel.
-      const tenon = generateTenonTab(span / 2, span, T, -T, params);
+      // Panel body: span (width) x H, with a tenon fused into the bottom
+      // edge (leaving a small margin at each corner) that plunges through
+      // the Bottom panel.
+      const tenonWidth = span - 2 * T;
       const outline = buildRectPanel(
         span,
         H,
-        { bottom: { type: 'flat' }, top: { type: 'flat' }, left: { type: 'flat' }, right: { type: 'flat' } },
+        {
+          bottom: { type: 'tenon', center: span / 2, width: tenonWidth, protrusion: T },
+          top: { type: 'flat' },
+          left: { type: 'flat' },
+          right: { type: 'flat' },
+        },
         params,
       );
       const panel: Panel = {
         id,
         label: `Pregrada ${counter}`,
         outline,
-        holes: [tenon],
+        holes: [],
         scoreLines: [],
         engravings: [],
         thickness: T,
@@ -257,24 +255,19 @@ function buildDividers(
       result.push(panel);
 
       // Matching mortise slot cut into the bottom panel: a rectangle
-      // running the full inner span in the divider's own axis, narrow
-      // (thickness T, kerf/tolerance compensated by generateMortiseSlot)
-      // in the cross axis. Bottom panel's local frame has its outer edge
-      // at (0,0), so the inner well starts at T on every side.
+      // matching the tenon's footprint exactly — narrow (thickness T,
+      // kerf/tolerance compensated by generateMortiseSlot) in the cross
+      // axis, spanning tenonWidth in the divider's own axis. Bottom
+      // panel's local frame has its outer edge at (0,0), so the inner
+      // well starts at T on every side.
       const center = posAlongMainAxis + T;
-      const baseSlot = generateMortiseSlot({ center, width: T, depth: span }, T, params);
-      const slot = isX ? baseSlot : rotateSlot90(baseSlot);
+      const baseSlot = generateMortiseSlot({ center, width: T, depth: tenonWidth }, T + T, params);
+      const slot = isX ? baseSlot : rotatePath90(baseSlot);
       bottom.holes.push(slot);
       counter++;
     }
   }
   return result;
-}
-
-/** generateMortiseSlot always elongates along x; for a Y-axis divider the
- * slot must instead elongate along y, narrow along x — swap coordinates. */
-function rotateSlot90(path: { x: number; y: number }[]) {
-  return path.map((p) => ({ x: p.y, y: p.x }));
 }
 
 function buildAssemblySteps(lidStyle: LidStyle, hasDividers: boolean) {

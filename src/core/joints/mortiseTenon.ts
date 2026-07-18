@@ -67,4 +67,12 @@ export function layoutDividerSlots(faceLength: number, dividerCount: number, _sl
   return centers;
 }
 
+/** Every mortise/tenon helper above elongates along x, narrow along y (a
+ * "bottom edge" tenon / "horizontal" slot). Swapping x<->y re-orients the
+ * same shape for a left/right-edge tenon or a vertically-elongated slot,
+ * without a second family of functions. */
+export function rotatePath90(path: Path): Path {
+  return path.map((p) => v2(p.y, p.x));
+}
+
 export type { Vector2 };

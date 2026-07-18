@@ -14,7 +14,15 @@ export type EdgeSpec =
    * longer than the inset panel it partially mates with (e.g. a box
    * floor's side edge, which only interlocks with the inset side wall
    * across the wall's own length, not the full floor edge). */
-  | { type: 'finger-partial'; tabDepth: number; startsWithTab: boolean; inset: number };
+  | { type: 'finger-partial'; tabDepth: number; startsWithTab: boolean; inset: number }
+  /** A single protruding tenon fused into an otherwise flat edge, centered
+   * at `center` with nominal `width`, plunging outward by `protrusion`.
+   * Kerf/tolerance-widened like a finger-joint tab so it fits a mating
+   * `generateMortiseSlot` cut. Unlike pushing a tenon shape into a panel's
+   * `holes` list, this is stitched directly into the outline path, so the
+   * tab is physically continuous with the rest of the panel instead of
+   * cutting free as a disconnected scrap. */
+  | { type: 'tenon'; center: number; width: number; protrusion: number };
 
 /**
  * Builds one closed panel outline (CCW, starting at the origin corner) for
@@ -53,6 +61,19 @@ function edgePoints(
   } else if (spec.type === 'finger') {
     const layout = computeFingerLayout(length, params);
     localPoints = generateFingerEdgePath(length, spec.tabDepth, layout, params, spec.startsWithTab);
+  } else if (spec.type === 'tenon') {
+    const adjust = params.kerf - params.clearance;
+    const halfWidth = (spec.width + adjust) / 2;
+    const start = spec.center - halfWidth;
+    const end = spec.center + halfWidth;
+    localPoints = [
+      v2(0, 0),
+      v2(start, 0),
+      v2(start, -spec.protrusion),
+      v2(end, -spec.protrusion),
+      v2(end, 0),
+      v2(length, 0),
+    ];
   } else {
     const midLength = length - spec.inset * 2;
     const layout = computeFingerLayout(midLength, params);

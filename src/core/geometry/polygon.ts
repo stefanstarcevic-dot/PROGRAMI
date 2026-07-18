@@ -111,6 +111,17 @@ export function pointInPolygon(point: Vector2, path: Path): boolean {
   return inside;
 }
 
+/** Builds a circle approximated as a regular polygon (CCW), for holes,
+ * bosses, and round engraving/cut features. */
+export function circlePath(center: Vector2, radius: number, steps = 32): Path {
+  const pts: Vector2[] = [];
+  for (let i = 0; i < steps; i++) {
+    const a = (i / steps) * Math.PI * 2;
+    pts.push(v2(center.x + Math.cos(a) * radius, center.y + Math.sin(a) * radius));
+  }
+  return pts;
+}
+
 /** Builds a rectangle path (CCW), centered at origin unless `origin` given. */
 export function rectPath(width: number, height: number, origin: Vector2 = v2(0, 0)): Path {
   return [

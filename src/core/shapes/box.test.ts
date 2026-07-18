@@ -99,6 +99,39 @@ describe('generateBox', () => {
     expect(bottom.holes.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('divider tenon is fused into the outline, not a disconnected hole', () => {
+    const design = generateBox({
+      width: 300,
+      depth: 200,
+      height: 150,
+      material,
+      tolerance: { mode: 'tight' },
+      lidStyle: 'closed',
+      dividers: [{ axis: 'x', count: 1 }],
+    });
+    const divider = design.panels.find((p) => p.id.startsWith('divider-'))!;
+    expect(divider.holes).toHaveLength(0);
+    const ys = divider.outline.map((p) => p.y);
+    expect(Math.min(...ys)).toBeLessThan(0); // tenon protrudes below y=0
+  });
+
+  it('accepts y-axis dividers with no geometry errors', () => {
+    const design = generateBox({
+      width: 300,
+      depth: 200,
+      height: 150,
+      material,
+      tolerance: { mode: 'tight' },
+      lidStyle: 'closed',
+      dividers: [{ axis: 'y', count: 2 }],
+    });
+    const errors = design.warnings.filter((w) => w.severity === 'error');
+    expect(errors).toEqual([]);
+    for (const panel of design.panels) {
+      expect(findSelfIntersections(panel.outline)).toHaveLength(0);
+    }
+  });
+
   it('flags a too-thin panel warning when depth leaves almost no room for the side panels', () => {
     // width/height generous, but depth is barely more than 2x thickness,
     // so the left/right panels (inset by thickness on each end) come out
