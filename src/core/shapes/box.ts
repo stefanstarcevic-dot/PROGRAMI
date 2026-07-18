@@ -3,7 +3,7 @@ import type { ToleranceSetting } from '../materials/tolerance';
 import { resolveToleranceClearance } from '../materials/tolerance';
 import type { FingerJointParams } from '../joints/finger';
 import { generateMortiseSlot, layoutDividerSlots, rotatePath90 } from '../joints/mortiseTenon';
-import { generateKnuckleHinge } from '../joints/hardware';
+import { computeKnuckleHingeLayout, knuckleHingePinBores } from '../joints/hardware';
 import { buildRectPanel } from './panelBuilder';
 import type { Design, Panel } from '../model/types';
 import { validateDesign } from '../validation/rules';
@@ -61,7 +61,11 @@ export function generateBox(spec: BoxSpec): Design {
 
   const panels: Panel[] = [];
 
-  const topJoint = lidStyle === 'closed' || lidStyle === 'hinged';
+  // A hinged lid isn't finger-jointed to the walls at all — it pivots on
+  // the knuckle hinge added to the Back panel below — so only a fully
+  // 'closed' (permanent) lid gets a finger-jointed top edge; every other
+  // style (open/friction/hinged) leaves the walls' top edges flat.
+  const topJoint = lidStyle === 'closed';
 
   // Front & Back: W x H
   panels.push(makeWallPanel('front', 'Prednja stranica', W, H, T, topJoint, params));
@@ -163,38 +167,58 @@ function makeFrictionLid(innerWidth: number, innerDepth: number, thickness: numb
 }
 
 function makeHingedLid(w: number, d: number, thickness: number, params: FingerJointParams): Panel[] {
-  // Lid sits flush over the opening; its back edge is left flat here and
-  // patched with hinge knuckles afterwards (patchBackForHinge), front/left/
-  // right stay flat so the lid can swing freely on the back hinge line.
+  // Lid sits flush over the opening; its back (top) edge carries hinge
+  // knuckles fused directly into the outline (isPanelA = true — the
+  // complementary knuckles on the Back wall use isPanelA = false so the
+  // two rows interleave), front/left/right stay flat so the lid can swing
+  // freely once a pin is threaded through both rows of bores.
+  const hingeLayout = computeKnuckleHingeLayout({ length: w, thickness, pinDiameter: 2, kerf: params.kerf });
   const outline = buildRectPanel(
     w,
     d,
-    { bottom: { type: 'flat' }, top: { type: 'flat' }, left: { type: 'flat' }, right: { type: 'flat' } },
+    {
+      bottom: { type: 'flat' },
+      top: { type: 'knuckle-hinge', layout: hingeLayout, isPanelA: true },
+      left: { type: 'flat' },
+      right: { type: 'flat' },
+    },
     params,
   );
+  // Bore holes are local to the edge frame (x along the edge, y outward
+  // from the boundary); the 'top' side maps edge-local (x, y) to panel
+  // space as (width - x, height - y) — see panelBuilder's placeOnSide.
+  const bores = knuckleHingePinBores(hingeLayout, true).map((c) => circlePath(v2(w - c.center.x, d - c.center.y), c.radius));
+
   const lid: Panel = {
     id: 'top',
     label: 'Poklopac (šarke)',
     outline,
-    holes: [],
+    holes: bores,
     scoreLines: [],
     engravings: [],
     thickness,
   };
-  const hinge = generateKnuckleHinge({ length: w, thickness, pinDiameter: 2, kerf: params.kerf });
-  // Knuckles for the lid sit along its back edge (y = d), offset outward.
-  lid.holes.push(...hinge.panelAKnuckles.map((k) => k.map((p) => v2(p.x, d - p.y))));
-  lid.holes.push(...hinge.pinHoles.map((c) => circlePath(v2(c.center.x, d), c.radius)));
   return [lid];
 }
 
 function patchBackForHinge(panels: Panel[], w: number, h: number, thickness: number, params: FingerJointParams) {
   const back = panels.find((p) => p.id === 'back');
   if (!back) return;
-  const hinge = generateKnuckleHinge({ length: w, thickness, pinDiameter: 2, kerf: params.kerf });
-  // Back panel's knuckles project outward (upward) from its top edge (y = h).
-  back.holes.push(...hinge.panelBKnuckles.map((k) => k.map((p) => v2(p.x, h + p.y))));
-  back.holes.push(...hinge.pinHoles.map((c) => circlePath(v2(c.center.x, h), c.radius)));
+  const hingeLayout = computeKnuckleHingeLayout({ length: w, thickness, pinDiameter: 2, kerf: params.kerf });
+  back.outline = buildRectPanel(
+    w,
+    h,
+    {
+      bottom: { type: 'finger', tabDepth: thickness, startsWithTab: true },
+      top: { type: 'knuckle-hinge', layout: hingeLayout, isPanelA: false },
+      left: { type: 'finger', tabDepth: thickness, startsWithTab: true },
+      right: { type: 'finger', tabDepth: thickness, startsWithTab: true },
+    },
+    params,
+  );
+  back.holes.push(
+    ...knuckleHingePinBores(hingeLayout, false).map((c) => circlePath(v2(w - c.center.x, h - c.center.y), c.radius)),
+  );
 }
 
 /**

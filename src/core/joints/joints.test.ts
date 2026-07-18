@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { generateLivingHingePattern } from './livingHinge';
 import { generateMortiseSlot, generateTenonTab, layoutDividerSlots } from './mortiseTenon';
 import { generateSnapFitTab, generateSnapFitCatchHole } from './snapFit';
-import { generateKnuckleHinge, magnetHole, evenlySpacedHoles } from './hardware';
+import { computeKnuckleHingeLayout, knuckleHingePinBores, generateKnuckleHingeEdgePath, magnetHole, evenlySpacedHoles } from './hardware';
 import type { FingerJointParams } from './finger';
 import { findSelfIntersections } from '../geometry/intersect';
 
@@ -64,16 +64,24 @@ describe('snap-fit', () => {
 });
 
 describe('hardware', () => {
-  it('knuckle hinge interleaves panel A / B knuckles and aligns pin bores', () => {
-    const result = generateKnuckleHinge({ length: 100, thickness: 4, pinDiameter: 2, kerf: 0.12 });
-    expect(result.panelAKnuckles.length + result.panelBKnuckles.length).toBe(result.pinHoles.length);
-    expect(Math.abs(result.panelAKnuckles.length - result.panelBKnuckles.length)).toBeLessThanOrEqual(1);
+  it('knuckle hinge layout gives panel A and B complementary, near-equal bore counts', () => {
+    const layout = computeKnuckleHingeLayout({ length: 100, thickness: 4, pinDiameter: 2, kerf: 0.12 });
+    const boresA = knuckleHingePinBores(layout, true);
+    const boresB = knuckleHingePinBores(layout, false);
+    expect(boresA.length + boresB.length).toBe(layout.count);
+    expect(Math.abs(boresA.length - boresB.length)).toBeLessThanOrEqual(1);
   });
 
-  it('knuckle outlines are simple polygons (no self-intersection)', () => {
-    const result = generateKnuckleHinge({ length: 200, thickness: 4, pinDiameter: 2, kerf: 0.15 });
-    for (const knuckle of [...result.panelAKnuckles, ...result.panelBKnuckles]) {
-      expect(findSelfIntersections(knuckle)).toHaveLength(0);
+  it('fused knuckle-hinge edge path is a simple polyline (no self-intersection) for both panels', () => {
+    const layout = computeKnuckleHingeLayout({ length: 200, thickness: 4, pinDiameter: 2, kerf: 0.15 });
+    for (const isPanelA of [true, false]) {
+      const edge = generateKnuckleHingeEdgePath(200, layout, isPanelA);
+      // Close it into a simple rectangle-ish loop (edge + a flat return path)
+      // to check for self-crossings the same way a real panel outline would.
+      const closedLoop = [...edge, { x: 200, y: 20 }, { x: 0, y: 20 }];
+      expect(findSelfIntersections(closedLoop)).toHaveLength(0);
+      expect(edge[0]).toEqual({ x: 0, y: 0 });
+      expect(edge[edge.length - 1].x).toBeCloseTo(200, 6);
     }
   });
 

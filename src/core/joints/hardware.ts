@@ -1,4 +1,3 @@
-import type { Path } from '../geometry/polygon';
 import type { Vector2 } from '../geometry/vector2';
 import { v2 } from '../geometry/vector2';
 
@@ -53,62 +52,84 @@ export interface KnuckleHingeParams {
   kerf: number;
 }
 
-export interface KnuckleHingeResult {
-  /** Knuckle outlines belonging to panel A (odd positions). */
-  panelAKnuckles: Path[];
-  /** Knuckle outlines belonging to panel B (even positions) — interleaves
-   * with panel A's when assembled and the pin is threaded through. */
-  panelBKnuckles: Path[];
-  /** Pin bore, one per knuckle, centered on the hinge axis. */
-  pinHoles: Circle[];
-  pinDiameter: number;
+export interface KnuckleHingeLayout {
+  count: number;
+  pitch: number;
+  /** Knuckle bump radius (already kerf-compensated), mm. */
+  radius: number;
+  /** Pin bore radius (already kerf-compensated), mm. */
+  boreRadius: number;
 }
 
 /**
- * A real, physically assemblable laser-cut hinge: both panels' shared
- * edge is cut into a series of interleaved semicircular "knuckles" (like a
- * piano/barrel hinge), each with a bore hole on the hinge axis. After
- * cutting, a rod/filament/dowel is threaded through all the aligned bores,
- * letting the two panels pivot freely — a well-known technique in the
- * laser-cutting community for hinged lids that need a real pivot rather
- * than a flexing living hinge.
+ * Lays out a laser-cut "piano hinge": both panels' shared edge is divided
+ * into equal-width slots, alternating between the two panels — one
+ * panel's material bulges into a rounded knuckle at even slots and stays
+ * flush at odd slots, the other panel is the exact complement — so the
+ * two edges interleave into a single row of knuckles when assembled, and
+ * a rod/filament/dowel threads through the bores to form a real pivoting
+ * hinge (as opposed to a flexing living hinge).
+ *
+ * This only computes the layout numbers; `panelBuilder.ts`'s
+ * `knuckle-hinge` edge type turns it into an actual fused outline (the
+ * bumps must be part of the panel's own cut path, not a separate hole, or
+ * they'd cut free as disconnected scrap — the same lesson learned from
+ * the tenon/mortise joints), and `pinBoreHoles` below gives the bore
+ * circles to add as ordinary interior holes once the bumps exist.
  */
-export function generateKnuckleHinge(params: KnuckleHingeParams): KnuckleHingeResult {
+export function computeKnuckleHingeLayout(params: KnuckleHingeParams): KnuckleHingeLayout {
   const { length, thickness, pinDiameter, kerf } = params;
   const knuckleDiameter = Math.max(thickness * 2.2, pinDiameter + thickness);
   const count = Math.max(3, Math.floor(length / knuckleDiameter));
   const pitch = length / count;
   const radius = knuckleDiameter / 2 - kerf / 2;
   const boreRadius = (pinDiameter + kerf) / 2;
-
-  const panelAKnuckles: Path[] = [];
-  const panelBKnuckles: Path[] = [];
-  const pinHoles: Circle[] = [];
-
-  for (let i = 0; i < count; i++) {
-    const cx = pitch * (i + 0.5);
-    const outline = semicircleOutline(cx, pitch, radius);
-    if (i % 2 === 0) panelAKnuckles.push(outline);
-    else panelBKnuckles.push(outline);
-    pinHoles.push({ center: v2(cx, 0), radius: boreRadius });
-  }
-
-  return { panelAKnuckles, panelBKnuckles, pinHoles, pinDiameter };
+  return { count, pitch, radius, boreRadius };
 }
 
-function semicircleOutline(cx: number, segmentWidth: number, radius: number, steps = 16): Path {
-  const half = segmentWidth / 2;
-  // Walk the perimeter in order: left base point, along the arc (bulging
-  // to -y, away from the panel edge) from left to right, then the right
-  // base point — closing back to the left base via the flat top edge.
-  // (Emitting the two base points first, before the arc, produced a
-  // self-crossing polygon: the flat edge and the arc's start/end wound up
-  // on opposite sides of each other.)
-  const pts: Vector2[] = [v2(cx - half, 0)];
-  for (let i = 1; i < steps; i++) {
-    const angle = Math.PI * (i / steps);
-    pts.push(v2(cx + Math.cos(Math.PI - angle) * radius, -Math.sin(angle) * radius));
+/**
+ * The fused edge path for one side of the hinge: walks the edge slot by
+ * slot, emitting a rounded knuckle bump (protruding to -y, the same
+ * "outward" convention `panelBuilder`'s `tenon` edge type uses) at every
+ * slot this panel owns, and a flush flat segment at every slot the other
+ * panel owns.
+ */
+export function generateKnuckleHingeEdgePath(edgeLength: number, layout: KnuckleHingeLayout, isPanelA: boolean, steps = 16): Vector2[] {
+  const { count, pitch, radius } = layout;
+  const points: Vector2[] = [v2(0, 0)];
+
+  for (let i = 0; i < count; i++) {
+    const isThisPanel = isPanelA ? i % 2 === 0 : i % 2 === 1;
+    const start = i * pitch;
+    const end = start + pitch;
+    const cx = start + pitch / 2;
+
+    if (!isThisPanel) {
+      points.push(v2(end, 0));
+      continue;
+    }
+    for (let s = 1; s < steps; s++) {
+      const angle = Math.PI * (s / steps);
+      points.push(v2(cx + Math.cos(Math.PI - angle) * radius, -Math.sin(angle) * radius));
+    }
+    points.push(v2(end, 0));
   }
-  pts.push(v2(cx + half, 0));
-  return pts;
+
+  const last = points[points.length - 1];
+  points[points.length - 1] = v2(edgeLength, last.y);
+  return points;
+}
+
+/** Bore holes for the panel that owns the knuckle at the given parity
+ * (`isPanelA` selects even vs. odd slots) — one per knuckle, centered
+ * inside the bump's solid material so it's a legitimate interior hole. */
+export function knuckleHingePinBores(layout: KnuckleHingeLayout, isPanelA: boolean): Circle[] {
+  const bores: Circle[] = [];
+  for (let i = 0; i < layout.count; i++) {
+    const isThisPanel = isPanelA ? i % 2 === 0 : i % 2 === 1;
+    if (!isThisPanel) continue;
+    const cx = layout.pitch * (i + 0.5);
+    bores.push({ center: v2(cx, -layout.radius * 0.55), radius: layout.boreRadius });
+  }
+  return bores;
 }

@@ -3,6 +3,8 @@ import { v2 } from '../geometry/vector2';
 import type { Path } from '../geometry/polygon';
 import type { FingerJointParams } from '../joints/finger';
 import { computeFingerLayout, generateFingerEdgePath } from '../joints/finger';
+import type { KnuckleHingeLayout } from '../joints/hardware';
+import { generateKnuckleHingeEdgePath } from '../joints/hardware';
 
 export type RectSide = 'bottom' | 'right' | 'top' | 'left';
 
@@ -22,7 +24,12 @@ export type EdgeSpec =
    * `holes` list, this is stitched directly into the outline path, so the
    * tab is physically continuous with the rest of the panel instead of
    * cutting free as a disconnected scrap. */
-  | { type: 'tenon'; center: number; width: number; protrusion: number };
+  | { type: 'tenon'; center: number; width: number; protrusion: number }
+  /** Rounded hinge knuckles fused into the edge, alternating with the
+   * mating panel per `isPanelA` — see `joints/hardware.ts`. Like `tenon`,
+   * this must be part of the outline (not a separate hole) since the
+   * knuckle bumps extend past the panel's flat boundary. */
+  | { type: 'knuckle-hinge'; layout: KnuckleHingeLayout; isPanelA: boolean };
 
 /**
  * Builds one closed panel outline (CCW, starting at the origin corner) for
@@ -74,13 +81,15 @@ function edgePoints(
       v2(end, 0),
       v2(length, 0),
     ];
-  } else {
+  } else if (spec.type === 'finger-partial') {
     const midLength = length - spec.inset * 2;
     const layout = computeFingerLayout(midLength, params);
     const mid = generateFingerEdgePath(midLength, spec.tabDepth, layout, params, spec.startsWithTab).map((p) =>
       v2(p.x + spec.inset, p.y),
     );
     localPoints = [v2(0, 0), ...mid, v2(length, 0)];
+  } else {
+    localPoints = generateKnuckleHingeEdgePath(length, spec.layout, spec.isPanelA);
   }
 
   return localPoints.map((p) => placeOnSide(p, side, width, height));
